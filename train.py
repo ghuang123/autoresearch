@@ -373,6 +373,13 @@ class MuonAdamW(torch.optim.Optimizer):
         self._muon_beta2_t = torch.tensor(0.0, dtype=torch.float32, device="cpu")
 
     def _step_adamw(self, group):
+        # Bolt: Hoist group-constant scalar tensor fills out of the parameter loop
+        # to reduce CPU cycle overhead per training step.
+        self._adamw_lr_t.fill_(group['lr'])
+        self._adamw_beta1_t.fill_(group['betas'][0])
+        self._adamw_beta2_t.fill_(group['betas'][1])
+        self._adamw_eps_t.fill_(group['eps'])
+        self._adamw_wd_t.fill_(group['weight_decay'])
         for p in group['params']:
             if p.grad is None:
                 continue
@@ -384,11 +391,6 @@ class MuonAdamW(torch.optim.Optimizer):
                 state['exp_avg_sq'] = torch.zeros_like(p)
             state['step'] += 1
             self._adamw_step_t.fill_(state['step'])
-            self._adamw_lr_t.fill_(group['lr'])
-            self._adamw_beta1_t.fill_(group['betas'][0])
-            self._adamw_beta2_t.fill_(group['betas'][1])
-            self._adamw_eps_t.fill_(group['eps'])
-            self._adamw_wd_t.fill_(group['weight_decay'])
             adamw_step_fused(p, grad, state['exp_avg'], state['exp_avg_sq'],
                             self._adamw_step_t, self._adamw_lr_t, self._adamw_beta1_t,
                             self._adamw_beta2_t, self._adamw_eps_t, self._adamw_wd_t)
