@@ -5,3 +5,7 @@
 ## 2024-10-25 - Optimizer Parameter Loop Hoisting
 **Learning:** In fused PyTorch optimizers such as AdamW, filling tensor variables for group-level constants inside the parameter loop adds unnecessary CPU cycle overhead per training step.
 **Action:** Always hoist group-constant scalar tensor updates (e.g., `.fill_()` for learning rate, betas, epsilon, and weight decay) out of the parameter loop to reduce CPU cycle overhead, while keeping per-parameter state updates (like `step`) inside the loop.
+
+## 2024-10-26 - Inplace ReLU Optimization
+**Learning:** In PyTorch MLPs, using `F.relu(x, inplace=True)` immediately after an `nn.Linear` projection is a safe and effective micro-optimization to reduce temporary memory allocation overhead, leading to measurable performance gains in eager mode execution.
+**Action:** Always consider using `inplace=True` for activation functions when the original input tensor is no longer needed (e.g., right after a linear projection) to save memory bandwidth and reduce allocation overhead.
