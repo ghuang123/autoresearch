@@ -108,7 +108,9 @@ class MLP(nn.Module):
 
     def forward(self, x):
         x = self.c_fc(x)
-        x = F.relu(x).square()
+        # ⚡ Optimization: In-place ReLU avoids allocating a temporary buffer
+        # for the intermediate activations, reducing memory bandwidth usage.
+        x = F.relu(x, inplace=True).square()
         x = self.c_proj(x)
         return x
 
