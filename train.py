@@ -108,7 +108,8 @@ class MLP(nn.Module):
 
     def forward(self, x):
         x = self.c_fc(x)
-        x = F.relu(x).square()
+        # ⚡ Bolt: Use inplace ReLU before squaring to reduce temporary VRAM allocation
+        x = F.relu(x, inplace=True).square()
         x = self.c_proj(x)
         return x
 
