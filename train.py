@@ -11,6 +11,7 @@ os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 import gc
 import math
 import time
+import collections
 from dataclasses import dataclass, asdict
 
 import torch
@@ -108,7 +109,8 @@ class MLP(nn.Module):
 
     def forward(self, x):
         x = self.c_fc(x)
-        x = F.relu(x).square()
+        # Use inplace ReLU to reduce memory allocations and improve cache locality
+        x = F.relu(x, inplace=True).square()
         x = self.c_proj(x)
         return x
 
@@ -256,10 +258,13 @@ class GPT(nn.Module):
             dict(kind='adamw', params=resid_params, lr=scalar_lr * 0.01, betas=adam_betas, eps=1e-10, weight_decay=0.0),
             dict(kind='adamw', params=x0_params, lr=scalar_lr, betas=(0.96, 0.95), eps=1e-10, weight_decay=0.0),
         ]
-        for shape in sorted({p.shape for p in matrix_params}):
-            group_params = [p for p in matrix_params if p.shape == shape]
+        # Replace O(n^2) nested loop with O(n) hash map lookup for parameter grouping
+        shape_to_params = collections.defaultdict(list)
+        for p in matrix_params:
+            shape_to_params[p.shape].append(p)
+        for shape in sorted(shape_to_params.keys()):
             param_groups.append(dict(
-                kind='muon', params=group_params, lr=matrix_lr,
+                kind='muon', params=shape_to_params[shape], lr=matrix_lr,
                 momentum=0.95, ns_steps=5, beta2=0.95, weight_decay=weight_decay,
             ))
         optimizer = MuonAdamW(param_groups)
