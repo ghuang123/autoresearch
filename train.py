@@ -108,7 +108,9 @@ class MLP(nn.Module):
 
     def forward(self, x):
         x = self.c_fc(x)
-        x = F.relu(x).square()
+        # Use inplace=True to save memory and reduce intermediate allocations
+        # Do not chain with .square_() as it modifies variables needed for gradient computation
+        x = F.relu(x, inplace=True).square()
         x = self.c_proj(x)
         return x
 
