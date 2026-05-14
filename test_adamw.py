@@ -1,48 +1,47 @@
 import ast
+
+def extract_code():
+    with open('train.py', 'r') as f:
+        tree = ast.parse(f.read())
+
+    code = []
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name in ('adamw_step_fused', 'muon_step_fused'):
+            code.append(ast.unparse(node))
+        elif isinstance(node, ast.ClassDef) and node.name == 'MuonAdamW':
+            code.append(ast.unparse(node))
+
+    return '\n\n'.join(code)
+
+code_str = extract_code()
+code_str = code_str.replace("@torch.compile(dynamic=False, fullgraph=True)", "")
+
+exec_env = {}
 import torch
+exec("import torch", exec_env)
+exec(code_str, exec_env)
 
-with open('train.py', 'r') as f:
-    source = f.read()
-
-parsed = ast.parse(source)
-
-nodes_to_keep = []
-for node in parsed.body:
-    if isinstance(node, ast.Import) or isinstance(node, ast.ImportFrom):
-        if 'prepare' not in [n.name for n in getattr(node, 'names', [])] and 'kernels' not in [n.name for n in getattr(node, 'names', [])]:
-             nodes_to_keep.append(node)
-    elif isinstance(node, ast.ClassDef) and node.name == 'MuonAdamW':
-        nodes_to_keep.append(node)
-    elif isinstance(node, ast.FunctionDef) and node.name in ('adamw_step_fused', 'muon_step_fused'):
-        nodes_to_keep.append(node)
-    elif isinstance(node, ast.Assign) and getattr(node.targets[0], 'id', None) == 'polar_express_coeffs':
-        nodes_to_keep.append(node)
-
-new_module_ast = ast.Module(body=nodes_to_keep, type_ignores=[])
-code = compile(new_module_ast, filename="<ast>", mode="exec")
-
-namespace = {}
-exec(code, namespace)
-
-MuonAdamW = namespace['MuonAdamW']
+MuonAdamW = exec_env['MuonAdamW']
 
 class DummyModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.linear1 = torch.nn.Linear(10, 10)
-        self.linear2 = torch.nn.Linear(10, 10)
-
-    def forward(self, x):
-        return self.linear2(torch.relu(self.linear1(x)))
+        self.w = torch.nn.Parameter(torch.ones(10, 10))
 
 model = DummyModel()
-param_groups = [
-    {'kind': 'adamw', 'params': list(model.parameters()), 'lr': 0.1, 'betas': (0.9, 0.999), 'eps': 1e-8, 'weight_decay': 0.01}
-]
-optimizer = MuonAdamW(param_groups)
-
-loss = model(torch.randn(1, 10)).sum()
+loss = model.w.sum()
 loss.backward()
 
+optimizer = MuonAdamW([
+    {'kind': 'adamw', 'params': [model.w], 'lr': 0.1, 'betas': (0.9, 0.999), 'eps': 1e-8, 'weight_decay': 0.01}
+])
+
+for group in optimizer.param_groups:
+    group['initial_lr'] = group['lr']
+
 optimizer.step()
-print("Step successful!")
+
+# Validate that parameters were actually updated and are not NaN
+assert not torch.isnan(model.w).any()
+assert not torch.allclose(model.w, torch.ones(10, 10))
+print("Tests passed successfully.")
