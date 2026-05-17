@@ -9,6 +9,7 @@ os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 
 import gc
+import collections
 import math
 import time
 from dataclasses import dataclass, asdict
@@ -256,10 +257,15 @@ class GPT(nn.Module):
             dict(kind='adamw', params=resid_params, lr=scalar_lr * 0.01, betas=adam_betas, eps=1e-10, weight_decay=0.0),
             dict(kind='adamw', params=x0_params, lr=scalar_lr, betas=(0.96, 0.95), eps=1e-10, weight_decay=0.0),
         ]
-        for shape in sorted({p.shape for p in matrix_params}):
-            group_params = [p for p in matrix_params if p.shape == shape]
+
+        # Group parameters by shape in O(N) using defaultdict
+        shape_groups = collections.defaultdict(list)
+        for p in matrix_params:
+            shape_groups[p.shape].append(p)
+
+        for shape in sorted(shape_groups.keys()):
             param_groups.append(dict(
-                kind='muon', params=group_params, lr=matrix_lr,
+                kind='muon', params=shape_groups[shape], lr=matrix_lr,
                 momentum=0.95, ns_steps=5, beta2=0.95, weight_decay=weight_decay,
             ))
         optimizer = MuonAdamW(param_groups)
