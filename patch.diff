@@ -1,0 +1,14 @@
+--- train.py
++++ train.py
+@@ -236,9 +236,9 @@
+     exp_avg_sq.lerp_(grad.square(), 1 - beta2_t)
+     bias1 = 1 - beta1_t ** step_t
+     bias2 = 1 - beta2_t ** step_t
+-    denom = (exp_avg_sq / bias2).sqrt() + eps_t
++    denom = (exp_avg_sq / bias2).sqrt_().add_(eps_t)
+     step_size = lr_t / bias1
+-    p.add_(exp_avg / denom, alpha=-step_size)
++    p.addcdiv_(exp_avg, denom, value=-step_size)
+
+ @torch.compile(dynamic=False, fullgraph=True)
+ def muon_step_fused(stacked_grads, stacked_params, momentum_buffer, second_momentum_buffer,
