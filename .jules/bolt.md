@@ -5,3 +5,7 @@
 ## 2024-10-25 - Optimizer Parameter Loop Hoisting
 **Learning:** In fused PyTorch optimizers such as AdamW, filling tensor variables for group-level constants inside the parameter loop adds unnecessary CPU cycle overhead per training step.
 **Action:** Always hoist group-constant scalar tensor updates (e.g., `.fill_()` for learning rate, betas, epsilon, and weight decay) out of the parameter loop to reduce CPU cycle overhead, while keeping per-parameter state updates (like `step`) inside the loop.
+
+## 2024-10-26 - Optimizer In-place Chain Operations
+**Learning:** In custom PyTorch optimizers, replacing `.add_` with `.addcdiv_` and chaining in-place operations like `.sqrt_().add_(eps_t)` on intermediate tensors safely reduces temporary memory allocations and improves CPU cache efficiency.
+**Action:** Use `.addcdiv_` and in-place math operations (like `.sqrt_()`, `.add_()`) in optimizer steps whenever combining divisions and additions to minimize temporary tensor creation.
