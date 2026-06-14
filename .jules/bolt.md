@@ -5,3 +5,6 @@
 ## 2024-10-25 - Optimizer Parameter Loop Hoisting
 **Learning:** In fused PyTorch optimizers such as AdamW, filling tensor variables for group-level constants inside the parameter loop adds unnecessary CPU cycle overhead per training step.
 **Action:** Always hoist group-constant scalar tensor updates (e.g., `.fill_()` for learning rate, betas, epsilon, and weight decay) out of the parameter loop to reduce CPU cycle overhead, while keeping per-parameter state updates (like `step`) inside the loop.
+## 2024-10-26 - Optimizer Intermediate Allocation Avoidance
+**Learning:** Computing divisions and square roots via temporary tensor allocations (`denom = (exp_avg_sq / bias2).sqrt() + eps_t` and `p.add_(exp_avg / denom, ...`) introduces memory bandwidth overhead in eager and compiled modes.
+**Action:** Replace intermediate variables with chained in-place operations (`.sqrt_().add_(...)`) and use compound in-place parameter updates (`.addcdiv_()`) to avoid allocating temporary tensors, reducing memory bandwidth pressure.
