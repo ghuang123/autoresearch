@@ -5,3 +5,7 @@
 ## 2024-10-25 - Optimizer Parameter Loop Hoisting
 **Learning:** In fused PyTorch optimizers such as AdamW, filling tensor variables for group-level constants inside the parameter loop adds unnecessary CPU cycle overhead per training step.
 **Action:** Always hoist group-constant scalar tensor updates (e.g., `.fill_()` for learning rate, betas, epsilon, and weight decay) out of the parameter loop to reduce CPU cycle overhead, while keeping per-parameter state updates (like `step`) inside the loop.
+
+## 2024-10-26 - Optimized Dataloader Packing
+**Learning:** In `prepare.py`'s `make_dataloader`, an optimized document packing approach maintains parallel sorted lists (`doc_lens` and `doc_tensors`) and uses `bisect.bisect_right` for O(log N) best-fit lookups, combined with `bisect.bisect_left` to extract the oldest matching document, resolving O(N) CPU bottlenecks while strictly preserving exact chronological tie-breaking. Converting document token lists to `torch.Tensor` objects during the `refill_buffer` stage hoists allocations out of the `make_dataloader` packing loop, reducing CPU overhead per training batch.
+**Action:** Optimize searches with `bisect` on collections of PyTorch tensors (like documents) using parallel lists (e.g., `doc_lens` and `doc_tensors`) instead of tuples.
