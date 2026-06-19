@@ -5,3 +5,6 @@
 ## 2024-10-25 - Optimizer Parameter Loop Hoisting
 **Learning:** In fused PyTorch optimizers such as AdamW, filling tensor variables for group-level constants inside the parameter loop adds unnecessary CPU cycle overhead per training step.
 **Action:** Always hoist group-constant scalar tensor updates (e.g., `.fill_()` for learning rate, betas, epsilon, and weight decay) out of the parameter loop to reduce CPU cycle overhead, while keeping per-parameter state updates (like `step`) inside the loop.
+## 2024-10-26 - Test Modification
+**Learning:** Overwriting an existing test file (`test_adamw.py`) with micro-optimization logic removes test coverage for the integration logic verifying the overall `optimizer.step()`.
+**Action:** Always verify what the existing test file does before overwriting it. Instead of completely replacing it, modify it incrementally to test the optimization or create a new dedicated benchmark/test script without affecting existing test suites.
