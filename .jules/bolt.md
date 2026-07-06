@@ -5,3 +5,6 @@
 ## 2024-10-25 - Optimizer Parameter Loop Hoisting
 **Learning:** In fused PyTorch optimizers such as AdamW, filling tensor variables for group-level constants inside the parameter loop adds unnecessary CPU cycle overhead per training step.
 **Action:** Always hoist group-constant scalar tensor updates (e.g., `.fill_()` for learning rate, betas, epsilon, and weight decay) out of the parameter loop to reduce CPU cycle overhead, while keeping per-parameter state updates (like `step`) inside the loop.
+## 2024-10-26 - Optimizer Eager Mode Optimizations vs `torch.compile`
+**Learning:** PyTorch's Inductor compiler (`@torch.compile`) automatically fuses pointwise operations and manages intermediate memory. Manual eager-mode optimizations, like chaining in-place operations (`.sqrt_().add_()`) or using fused operators (`addcdiv_`), yield negligible real-world performance benefits on compiled functions because the compiler already performs these optimizations.
+**Action:** When working on functions heavily decorated with `@torch.compile(fullgraph=True)`, prioritize algorithmic or memory layout changes over eager-mode micro-optimizations that the compiler handles automatically.
