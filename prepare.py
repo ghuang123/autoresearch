@@ -16,6 +16,7 @@ import math
 import argparse
 import pickle
 from multiprocessing import Pool
+import bisect
 
 import requests
 import pyarrow.parquet as pq
@@ -280,18 +281,29 @@ def make_dataloader(tokenizer, B, T, split, buffer_size=1000):
     When no document fits remaining space, crops shortest doc to fill exactly.
     100% utilization (no padding).
     """
+    # ⚡ Bolt: Optimized packing algorithm using parallel sorted lists (doc_lens, doc_tensors)
+    # and O(log N) bisect operations instead of O(N) linear scans. Tensor allocations are
+    # also hoisted out of the inner loop into refill_buffer to reduce CPU overhead.
     assert split in ["train", "val"]
     row_capacity = T + 1
     batches = _document_batches(split)
     bos_token = tokenizer.get_bos_token_id()
-    doc_buffer = []
+    doc_lens = []
+    doc_tensors = []
     epoch = 1
 
     def refill_buffer():
         nonlocal epoch
         doc_batch, epoch = next(batches)
         token_lists = tokenizer.encode(doc_batch, prepend=bos_token)
-        doc_buffer.extend(token_lists)
+        # Insert them in sorted order based on length to enable bisect
+        for lst in token_lists:
+            t = torch.tensor(lst, dtype=torch.long)
+            doc_len = len(t)
+            # Use bisect_right to maintain chronological order for identical lengths
+            idx = bisect.bisect_right(doc_lens, doc_len)
+            doc_lens.insert(idx, doc_len)
+            doc_tensors.insert(idx, t)
 
     # Pre-allocate buffers: [inputs (B*T) | targets (B*T)]
     row_buffer = torch.empty((B, row_capacity), dtype=torch.long)
@@ -306,29 +318,26 @@ def make_dataloader(tokenizer, B, T, split, buffer_size=1000):
         for row_idx in range(B):
             pos = 0
             while pos < row_capacity:
-                while len(doc_buffer) < buffer_size:
+                while len(doc_lens) < buffer_size:
                     refill_buffer()
 
                 remaining = row_capacity - pos
 
-                # Find largest doc that fits entirely
-                best_idx = -1
-                best_len = 0
-                for i, doc in enumerate(doc_buffer):
-                    doc_len = len(doc)
-                    if doc_len <= remaining and doc_len > best_len:
-                        best_idx = i
-                        best_len = doc_len
+                # O(log N) search for largest doc that fits entirely
+                idx = bisect.bisect_right(doc_lens, remaining) - 1
 
-                if best_idx >= 0:
-                    doc = doc_buffer.pop(best_idx)
-                    row_buffer[row_idx, pos:pos + len(doc)] = torch.tensor(doc, dtype=torch.long)
-                    pos += len(doc)
+                if idx >= 0:
+                    doc = doc_tensors.pop(idx)
+                    doc_len = doc_lens.pop(idx)
+                    row_buffer[row_idx, pos:pos + doc_len] = doc
+                    pos += doc_len
                 else:
                     # No doc fits — crop shortest to fill remaining
-                    shortest_idx = min(range(len(doc_buffer)), key=lambda i: len(doc_buffer[i]))
-                    doc = doc_buffer.pop(shortest_idx)
-                    row_buffer[row_idx, pos:pos + remaining] = torch.tensor(doc[:remaining], dtype=torch.long)
+                    # Since it's sorted, shortest is always at index 0 (or bisect_left for FIFO)
+                    shortest_idx = bisect.bisect_left(doc_lens, doc_lens[0])
+                    doc = doc_tensors.pop(shortest_idx)
+                    doc_lens.pop(shortest_idx)
+                    row_buffer[row_idx, pos:pos + remaining] = doc[:remaining]
                     pos += remaining
 
         cpu_inputs.copy_(row_buffer[:, :-1])
