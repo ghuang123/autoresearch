@@ -13,6 +13,7 @@ import os
 import sys
 import time
 import math
+import bisect
 import argparse
 import pickle
 from multiprocessing import Pool
@@ -284,14 +285,22 @@ def make_dataloader(tokenizer, B, T, split, buffer_size=1000):
     row_capacity = T + 1
     batches = _document_batches(split)
     bos_token = tokenizer.get_bos_token_id()
-    doc_buffer = []
+    doc_tensors = []
+    doc_lens = []
     epoch = 1
 
     def refill_buffer():
         nonlocal epoch
         doc_batch, epoch = next(batches)
         token_lists = tokenizer.encode(doc_batch, prepend=bos_token)
-        doc_buffer.extend(token_lists)
+        for doc in token_lists:
+            t = torch.tensor(doc, dtype=torch.long)
+            doc_len = len(doc)
+            # Maintain parallel sorted lists to strictly preserve chronological FIFO
+            # use bisect_right to insert new elements after identical length elements
+            idx = bisect.bisect_right(doc_lens, doc_len)
+            doc_lens.insert(idx, doc_len)
+            doc_tensors.insert(idx, t)
 
     # Pre-allocate buffers: [inputs (B*T) | targets (B*T)]
     row_buffer = torch.empty((B, row_capacity), dtype=torch.long)
@@ -302,33 +311,36 @@ def make_dataloader(tokenizer, B, T, split, buffer_size=1000):
     inputs = gpu_buffer[:B * T].view(B, T)
     targets = gpu_buffer[B * T:].view(B, T)
 
+    # Performance optimization:
+    # Replaced O(N) linear search for best-fit doc with O(log N) binary search using parallel sorted lists (doc_lens, doc_tensors).
+    # Expected impact: reduces `make_dataloader` overhead from ~2.7s to ~1.1s for 5 steps.
     while True:
         for row_idx in range(B):
             pos = 0
             while pos < row_capacity:
-                while len(doc_buffer) < buffer_size:
+                while len(doc_lens) < buffer_size:
                     refill_buffer()
 
                 remaining = row_capacity - pos
 
-                # Find largest doc that fits entirely
-                best_idx = -1
-                best_len = 0
-                for i, doc in enumerate(doc_buffer):
-                    doc_len = len(doc)
-                    if doc_len <= remaining and doc_len > best_len:
-                        best_idx = i
-                        best_len = doc_len
+                # O(log N) lookup
+                idx = bisect.bisect_right(doc_lens, remaining)
+                if idx > 0:
+                    # found a doc that fits, extract the largest matching one.
+                    # Use bisect_left to extract the oldest inserted doc of the target length to strictly preserve FIFO.
+                    target_len = doc_lens[idx - 1]
+                    best_idx = bisect.bisect_left(doc_lens, target_len)
 
-                if best_idx >= 0:
-                    doc = doc_buffer.pop(best_idx)
-                    row_buffer[row_idx, pos:pos + len(doc)] = torch.tensor(doc, dtype=torch.long)
-                    pos += len(doc)
+                    t = doc_tensors.pop(best_idx)
+                    doc_len = doc_lens.pop(best_idx)
+                    row_buffer[row_idx, pos:pos + doc_len] = t
+                    pos += doc_len
                 else:
-                    # No doc fits — crop shortest to fill remaining
-                    shortest_idx = min(range(len(doc_buffer)), key=lambda i: len(doc_buffer[i]))
-                    doc = doc_buffer.pop(shortest_idx)
-                    row_buffer[row_idx, pos:pos + remaining] = torch.tensor(doc[:remaining], dtype=torch.long)
+                    # crop shortest
+                    shortest_idx = 0
+                    t = doc_tensors.pop(shortest_idx)
+                    doc_len = doc_lens.pop(shortest_idx)
+                    row_buffer[row_idx, pos:pos + remaining] = t[:remaining]
                     pos += remaining
 
         cpu_inputs.copy_(row_buffer[:, :-1])
