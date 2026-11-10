@@ -5,3 +5,7 @@
 ## 2024-10-25 - Optimizer Parameter Loop Hoisting
 **Learning:** In fused PyTorch optimizers such as AdamW, filling tensor variables for group-level constants inside the parameter loop adds unnecessary CPU cycle overhead per training step.
 **Action:** Always hoist group-constant scalar tensor updates (e.g., `.fill_()` for learning rate, betas, epsilon, and weight decay) out of the parameter loop to reduce CPU cycle overhead, while keeping per-parameter state updates (like `step`) inside the loop.
+
+## 2024-10-26 - O(log N) Best-Fit Dataloader Packing
+**Learning:** In PyTorch data loading pipelines (like `prepare.py`), packing algorithms with an O(N) inner loop and per-document tensor allocations inside the packing iteration cause significant CPU overhead.
+**Action:** Hoist tensor allocations out into the buffer refill stage, and maintain parallel sorted lists (using `bisect`) for O(log N) best-fit capacity lookups to heavily optimize data preparation overhead.
